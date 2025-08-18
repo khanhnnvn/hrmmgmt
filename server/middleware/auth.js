@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { pool } from '../config/database.js';
+import { dbGet } from '../config/database.js';
 
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -13,16 +13,16 @@ const authenticateToken = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'hrm_secret_key');
     
     // Lấy thông tin user từ database
-    const [users] = await pool.execute(
+    const user = await dbGet(
       'SELECT id, email, name, role, department, position FROM users WHERE id = ?',
       [decoded.userId]
     );
 
-    if (users.length === 0) {
+    if (!user) {
       return res.status(401).json({ message: 'User không tồn tại' });
     }
 
-    req.user = users[0];
+    req.user = user;
     next();
   } catch (error) {
     return res.status(403).json({ message: 'Token không hợp lệ' });
