@@ -1,251 +1,149 @@
 import bcrypt from 'bcryptjs';
-import { pool } from '../config/database.js';
+import { dbRun, dbGet, initDatabase } from '../config/database.js';
 
 const seedInitialData = async () => {
   try {
-    console.log('Bắt đầu tạo dữ liệu mẫu...');
+    console.log('🌱 Initializing database...');
+    await initDatabase();
 
-    // Tạo users mẫu
+    console.log('🌱 Seeding initial data...');
+
+    // Hash password for all users
     const hashedPassword = await bcrypt.hash('123456', 10);
-    
+
+    // Create users
     const users = [
-      {
-        email: 'admin@company.com',
-        password: hashedPassword,
-        name: 'Quản trị viên',
-        role: 'admin',
-        department: 'Hành chính',
-        position: 'Quản trị hệ thống',
-        join_date: '2024-01-01'
-      },
-      {
-        email: 'hr@company.com',
-        password: hashedPassword,
-        name: 'Trưởng phòng Nhân sự',
-        role: 'hr',
-        department: 'Nhân sự',
-        position: 'Trưởng phòng HR',
-        join_date: '2024-01-15'
-      },
-      {
-        email: 'manager@company.com',
-        password: hashedPassword,
-        name: 'Trưởng phòng Phát triển',
-        role: 'manager',
-        department: 'Phát triển',
-        position: 'Trưởng phòng',
-        join_date: '2024-02-01'
-      },
-      {
-        email: 'employee@company.com',
-        password: hashedPassword,
-        name: 'Nguyễn Văn An',
-        role: 'employee',
-        department: 'Phát triển',
-        position: 'Lập trình viên',
-        join_date: '2024-03-01'
-      }
+      { email: 'admin@company.com', password: hashedPassword, role: 'admin' },
+      { email: 'hr@company.com', password: hashedPassword, role: 'hr' },
+      { email: 'manager@company.com', password: hashedPassword, role: 'manager' },
+      { email: 'employee@company.com', password: hashedPassword, role: 'employee' }
     ];
 
-    // Xóa dữ liệu cũ
-    await pool.execute('DELETE FROM users');
-    await pool.execute('ALTER TABLE users AUTO_INCREMENT = 1');
-
-    // Thêm users
+    const userIds = [];
     for (const user of users) {
-      await pool.execute(
-        'INSERT INTO users (email, password, name, role, department, position, join_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [user.email, user.password, user.name, user.role, user.department, user.position, user.join_date, 'active']
+      const result = await dbRun(
+        'INSERT INTO users (email, password, role) VALUES (?, ?, ?)',
+        [user.email, user.password, user.role]
       );
+      userIds.push(result.insertId);
     }
 
-    // Tạo employees mẫu
+    // Create employees
     const employees = [
       {
+        user_id: userIds[0],
         employee_id: 'EMP001',
-        user_id: 1,
-        name: 'Quản trị viên',
+        first_name: 'Admin',
+        last_name: 'User',
         email: 'admin@company.com',
-        phone: '0901234567',
-        department: 'Hành chính',
-        position: 'Quản trị hệ thống',
-        join_date: '2024-01-01',
-        salary: 20000000,
-        skills: ['Quản lý hệ thống', 'Bảo mật'],
-        kpi: 95
+        phone: '0123456789',
+        department: 'Administration',
+        position: 'System Administrator',
+        hire_date: '2023-01-01',
+        salary: 50000
       },
       {
+        user_id: userIds[1],
         employee_id: 'EMP002',
-        user_id: 2,
-        name: 'Trưởng phòng Nhân sự',
+        first_name: 'HR',
+        last_name: 'Manager',
         email: 'hr@company.com',
-        phone: '0901234568',
-        department: 'Nhân sự',
-        position: 'Trưởng phòng HR',
-        join_date: '2024-01-15',
-        salary: 18000000,
-        skills: ['Quản lý nhân sự', 'Tuyển dụng'],
-        kpi: 92
+        phone: '0123456790',
+        department: 'Human Resources',
+        position: 'HR Manager',
+        hire_date: '2023-01-15',
+        salary: 45000
       },
       {
+        user_id: userIds[2],
         employee_id: 'EMP003',
-        user_id: 3,
-        name: 'Trưởng phòng Phát triển',
+        first_name: 'Development',
+        last_name: 'Manager',
         email: 'manager@company.com',
-        phone: '0901234569',
-        department: 'Phát triển',
-        position: 'Trưởng phòng',
-        join_date: '2024-02-01',
-        salary: 25000000,
-        skills: ['Quản lý dự án', 'React', 'Node.js'],
-        kpi: 96
+        phone: '0123456791',
+        department: 'Development',
+        position: 'Development Manager',
+        hire_date: '2023-02-01',
+        salary: 55000
       },
       {
+        user_id: userIds[3],
         employee_id: 'EMP004',
-        user_id: 4,
-        name: 'Nguyễn Văn An',
+        first_name: 'John',
+        last_name: 'Doe',
         email: 'employee@company.com',
-        phone: '0901234570',
-        department: 'Phát triển',
-        position: 'Lập trình viên',
-        manager_id: 3,
-        join_date: '2024-03-01',
-        salary: 15000000,
-        skills: ['React', 'JavaScript', 'MySQL'],
-        kpi: 88
+        phone: '0123456792',
+        department: 'Development',
+        position: 'Software Developer',
+        hire_date: '2023-03-01',
+        salary: 40000
       }
     ];
 
-    await pool.execute('DELETE FROM employees');
-    await pool.execute('ALTER TABLE employees AUTO_INCREMENT = 1');
-
-    for (const emp of employees) {
-      await pool.execute(
-        `INSERT INTO employees (employee_id, user_id, name, email, phone, department, position, manager_id, join_date, salary, skills, kpi, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [emp.employee_id, emp.user_id, emp.name, emp.email, emp.phone, emp.department, emp.position, 
-         emp.manager_id || null, emp.join_date, emp.salary, JSON.stringify(emp.skills), emp.kpi, 'active']
-      );
+    const employeeIds = [];
+    for (const employee of employees) {
+      const result = await dbRun(`
+        INSERT INTO employees (
+          user_id, employee_id, first_name, last_name, email, phone,
+          department, position, hire_date, salary
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        employee.user_id, employee.employee_id, employee.first_name,
+        employee.last_name, employee.email, employee.phone,
+        employee.department, employee.position, employee.hire_date,
+        employee.salary
+      ]);
+      employeeIds.push(result.insertId);
     }
 
-    // Tạo dữ liệu chấm công mẫu
-    const timeEntries = [
-      { employee_id: 4, date: '2024-12-18', check_in: '09:00:00', check_out: '18:00:00', location: 'Văn phòng chính', type: 'office', status: 'on_time' },
-      { employee_id: 4, date: '2024-12-17', check_in: '09:15:00', check_out: '18:30:00', location: 'Văn phòng chính', type: 'office', status: 'late', overtime: 0.5 },
-      { employee_id: 4, date: '2024-12-16', check_in: '08:45:00', check_out: '17:45:00', location: 'Nhà riêng', type: 'wfh', status: 'on_time' }
-    ];
+    // Create sample attendance records
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
 
-    await pool.execute('DELETE FROM time_entries');
-    for (const entry of timeEntries) {
-      await pool.execute(
-        'INSERT INTO time_entries (employee_id, date, check_in, check_out, location, type, status, overtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [entry.employee_id, entry.date, entry.check_in, entry.check_out, entry.location, entry.type, entry.status, entry.overtime || 0]
-      );
+    for (const empId of employeeIds) {
+      await dbRun(`
+        INSERT INTO attendance (employee_id, date, check_in, check_out, total_hours, status)
+        VALUES (?, ?, '09:00:00', '17:00:00', 8.0, 'present')
+      `, [empId, yesterday.toISOString().split('T')[0]]);
     }
 
-    // Tạo đơn nghỉ phép mẫu
-    const leaveRequests = [
-      { employee_id: 4, type: 'annual', start_date: '2024-12-25', end_date: '2024-12-27', days: 3, reason: 'Nghỉ lễ Giáng sinh cùng gia đình', status: 'pending' },
-      { employee_id: 4, type: 'sick', start_date: '2024-12-20', end_date: '2024-12-20', days: 1, reason: 'Khám bệnh định kỳ', status: 'approved', approved_by: 3 }
-    ];
+    // Create sample tasks
+    await dbRun(`
+      INSERT INTO tasks (title, description, assigned_to, assigned_by, priority, status, due_date)
+      VALUES ('Setup Development Environment', 'Configure development tools and environment', ?, ?, 'high', 'in_progress', ?)
+    `, [employeeIds[3], employeeIds[2], '2024-01-31']);
 
-    await pool.execute('DELETE FROM leave_requests');
-    for (const leave of leaveRequests) {
-      await pool.execute(
-        'INSERT INTO leave_requests (employee_id, type, start_date, end_date, days, reason, status, approved_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [leave.employee_id, leave.type, leave.start_date, leave.end_date, leave.days, leave.reason, leave.status, leave.approved_by || null]
-      );
-    }
+    // Create sample assets
+    await dbRun(`
+      INSERT INTO assets (asset_tag, name, category, description, assigned_to, status, purchase_date, purchase_cost)
+      VALUES ('LAPTOP001', 'Dell Laptop', 'Computer', 'Development laptop for employee', ?, 'assigned', '2023-01-01', 1200.00)
+    `, [employeeIds[3]]);
 
-    // Tạo tasks mẫu
-    const tasks = [
-      {
-        title: 'Hoàn thiện tài liệu dự án',
-        description: 'Viết tài liệu chi tiết cho hệ thống HRM bao gồm hướng dẫn sử dụng và tài liệu kỹ thuật.',
-        assigned_to: 4,
-        assigned_by: 3,
-        department: 'Phát triển',
-        priority: 'high',
-        status: 'in_progress',
-        progress: 75,
-        due_date: '2024-12-25'
-      },
-      {
-        title: 'Review code thay đổi',
-        description: 'Kiểm tra các pull request mới nhất cho module xác thực.',
-        assigned_to: 4,
-        assigned_by: 3,
-        department: 'Phát triển',
-        priority: 'medium',
-        status: 'not_started',
-        progress: 0,
-        due_date: '2024-12-22'
-      }
-    ];
-
-    await pool.execute('DELETE FROM tasks');
-    for (const task of tasks) {
-      await pool.execute(
-        'INSERT INTO tasks (title, description, assigned_to, assigned_by, department, priority, status, progress, due_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [task.title, task.description, task.assigned_to, task.assigned_by, task.department, task.priority, task.status, task.progress, task.due_date]
-      );
-    }
-
-    // Tạo tài sản mẫu
-    const assets = [
-      {
-        name: 'MacBook Pro 13"',
-        type: 'laptop',
-        model: 'MacBook Pro M1',
-        serial_number: 'C02D12345678',
-        assigned_to: 4,
-        assigned_date: '2024-03-15',
-        status: 'assigned',
-        condition_status: 'good',
-        purchase_date: '2024-03-01',
-        warranty_date: '2027-03-01',
-        value: 32000000
-      },
-      {
-        name: 'Màn hình Dell 24"',
-        type: 'monitor',
-        model: 'Dell S2421DS',
-        serial_number: 'DL24556789',
-        assigned_to: 4,
-        assigned_date: '2024-03-15',
-        status: 'assigned',
-        condition_status: 'new',
-        purchase_date: '2024-03-10',
-        warranty_date: '2027-03-10',
-        value: 7500000
-      }
-    ];
-
-    await pool.execute('DELETE FROM assets');
-    for (const asset of assets) {
-      await pool.execute(
-        'INSERT INTO assets (name, type, model, serial_number, assigned_to, assigned_date, status, condition_status, purchase_date, warranty_date, value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [asset.name, asset.type, asset.model, asset.serial_number, asset.assigned_to, asset.assigned_date, asset.status, asset.condition_status, asset.purchase_date, asset.warranty_date, asset.value]
-      );
-    }
-
-    console.log('✅ Tạo dữ liệu mẫu thành công!');
-    console.log('📧 Tài khoản đăng nhập:');
+    console.log('✅ Initial data seeded successfully');
+    console.log('📋 Sample accounts created:');
     console.log('   Admin: admin@company.com / 123456');
     console.log('   HR: hr@company.com / 123456');
     console.log('   Manager: manager@company.com / 123456');
     console.log('   Employee: employee@company.com / 123456');
 
   } catch (error) {
-    console.error('❌ Lỗi tạo dữ liệu mẫu:', error);
+    console.error('❌ Error seeding initial data:', error);
+    throw error;
   }
 };
 
-// Chạy seeder nếu file được gọi trực tiếp
-if (import.meta.url === new URL(process.argv[1], 'file://').href) {
-  seedInitialData().then(() => {
-    process.exit(0);
-  });
+// Run seeder if called directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  seedInitialData()
+    .then(() => {
+      console.log('🎉 Database seeding completed');
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('💥 Database seeding failed:', error);
+      process.exit(1);
+    });
 }
 
-export { seedInitialData };
+export default seedInitialData;
