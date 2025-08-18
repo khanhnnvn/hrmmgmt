@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { config } from 'dotenv';
+import seedInitialData from './seeders/initial-data.js';
 
 config();
 
@@ -64,9 +65,17 @@ const startServer = async () => {
   try {
     await initDatabase();
     
-    app.listen(PORT, () => {
+    app.listen(PORT, async () => {
       console.log(`🚀 HRM Server đang chạy tại http://localhost:${PORT}`);
       console.log(`📊 API Health Check: http://localhost:${PORT}/api/health`);
+      
+      // Initialize database with sample data
+      try {
+        await seedInitialData();
+        console.log('📊 Database initialized with sample data');
+      } catch (error) {
+        console.error('❌ Failed to initialize database:', error);
+      }
     });
   } catch (error) {
     console.error('Lỗi khởi động server:', error);
