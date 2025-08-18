@@ -1,6 +1,6 @@
-const express = require('express');
-const { pool } = require('../config/database');
-const { authenticateToken, authorizeRoles } = require('../middleware/auth');
+import express from 'express';
+import { pool } from '../config/database.js';
+import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -129,4 +129,4 @@ router.delete('/:id', authenticateToken, authorizeRoles('admin', 'hr'), async (r
   }
 });
 
-module.exports = router;
+export default router;

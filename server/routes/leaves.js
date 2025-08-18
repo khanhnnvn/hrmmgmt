@@ -1,6 +1,6 @@
-const express = require('express');
-const { pool } = require('../config/database');
-const { authenticateToken, authorizeRoles } = require('../middleware/auth');
+import express from 'express';
+import { pool } from '../config/database.js';
+import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -173,4 +173,4 @@ router.get('/balance/:employeeId?', authenticateToken, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

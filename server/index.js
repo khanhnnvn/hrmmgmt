@@ -1,19 +1,26 @@
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-require('dotenv').config();
+import express from 'express';
+import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import dotenv from 'dotenv';
 
-const { initDatabase } = require('./config/database');
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+import { initDatabase } from './config/database.js';
 
 // Import routes
-const authRoutes = require('./routes/auth');
-const employeeRoutes = require('./routes/employees');
-const attendanceRoutes = require('./routes/attendance');
-const leaveRoutes = require('./routes/leaves');
-const taskRoutes = require('./routes/tasks');
-const assetRoutes = require('./routes/assets');
-const reportRoutes = require('./routes/reports');
-const dashboardRoutes = require('./routes/dashboard');
+import authRoutes from './routes/auth.js';
+import employeeRoutes from './routes/employees.js';
+import attendanceRoutes from './routes/attendance.js';
+import leaveRoutes from './routes/leaves.js';
+import taskRoutes from './routes/tasks.js';
+import assetRoutes from './routes/assets.js';
+import reportRoutes from './routes/reports.js';
+import dashboardRoutes from './routes/dashboard.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
