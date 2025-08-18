@@ -1,7 +1,7 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { pool } from '../config/database.js';
+import { dbRun, dbGet, dbAll } from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -12,16 +12,15 @@ router.post('/login', async (req, res) => {
     const { email, password } = req.body;
 
     // Kiểm tra user tồn tại
-    const [users] = await pool.execute(
+    const user = await dbGet(
       'SELECT * FROM users WHERE email = ?',
       [email]
     );
 
-    if (users.length === 0) {
+    if (!user) {
       return res.status(401).json({ message: 'Email hoặc mật khẩu không đúng' });
     }
 
-    const user = users[0];
 
     // Kiểm tra mật khẩu
     const isValidPassword = await bcrypt.compare(password, user.password);
@@ -53,16 +52,16 @@ router.post('/login', async (req, res) => {
 // Lấy thông tin user hiện tại
 router.get('/me', authenticateToken, async (req, res) => {
   try {
-    const [users] = await pool.execute(
+    const user = await dbGet(
       'SELECT id, email, name, role, department, position, avatar, phone, join_date, status FROM users WHERE id = ?',
       [req.user.id]
     );
 
-    if (users.length === 0) {
+    if (!user) {
       return res.status(404).json({ message: 'User không tồn tại' });
     }
 
-    res.json(users[0]);
+    res.json(user);
   } catch (error) {
     console.error('Lỗi lấy thông tin user:', error);
     res.status(500).json({ message: 'Lỗi server' });

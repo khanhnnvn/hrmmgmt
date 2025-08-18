@@ -1,5 +1,5 @@
 import express from 'express';
-import { pool } from '../config/database.js';
+import { dbRun, dbGet, dbAll } from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -12,24 +12,24 @@ router.post('/checkin', authenticateToken, async (req, res) => {
     const currentTime = new Date().toTimeString().split(' ')[0];
 
     // Lấy employee_id từ user
-    const [employees] = await pool.execute(
+    const employee = await dbGet(
       'SELECT id FROM employees WHERE user_id = ?',
       [req.user.id]
     );
 
-    if (employees.length === 0) {
+    if (!employee) {
       return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
     }
 
-    const employeeId = employees[0].id;
+    const employeeId = employee.id;
 
     // Kiểm tra đã check-in hôm nay chưa
-    const [existing] = await pool.execute(
+    const existing = await dbGet(
       'SELECT id FROM time_entries WHERE employee_id = ? AND date = ?',
       [employeeId, today]
     );
 
-    if (existing.length > 0) {
+    if (existing) {
       return res.status(400).json({ message: 'Đã check-in hôm nay rồi' });
     }
 
@@ -39,7 +39,7 @@ router.post('/checkin', authenticateToken, async (req, res) => {
     const status = checkInTime > standardTime ? 'late' : 'on_time';
 
     // Tạo bản ghi check-in
-    await pool.execute(
+    await dbRun(
       'INSERT INTO time_entries (employee_id, date, check_in, location, type, status) VALUES (?, ?, ?, ?, ?, ?)',
       [employeeId, today, currentTime, location, type, status]
     );
@@ -62,29 +62,29 @@ router.post('/checkout', authenticateToken, async (req, res) => {
     const currentTime = new Date().toTimeString().split(' ')[0];
 
     // Lấy employee_id từ user
-    const [employees] = await pool.execute(
+    const employee = await dbGet(
       'SELECT id FROM employees WHERE user_id = ?',
       [req.user.id]
     );
 
-    if (employees.length === 0) {
+    if (!employee) {
       return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
     }
 
-    const employeeId = employees[0].id;
+    const employeeId = employee.id;
 
     // Kiểm tra đã check-in chưa
-    const [existing] = await pool.execute(
+    const existing = await dbGet(
       'SELECT id, check_in FROM time_entries WHERE employee_id = ? AND date = ? AND check_out IS NULL',
       [employeeId, today]
     );
 
-    if (existing.length === 0) {
+    if (!existing) {
       return res.status(400).json({ message: 'Chưa check-in hoặc đã check-out rồi' });
     }
 
     // Tính overtime
-    const checkInTime = new Date(`2000-01-01 ${existing[0].check_in}`);
+    const checkInTime = new Date(`2000-01-01 ${existing.check_in}`);
     const checkOutTime = new Date(`2000-01-01 ${currentTime}`);
     const standardEndTime = new Date('2000-01-01 18:00:00');
     
@@ -94,9 +94,9 @@ router.post('/checkout', authenticateToken, async (req, res) => {
     }
 
     // Cập nhật check-out
-    await pool.execute(
+    await dbRun(
       'UPDATE time_entries SET check_out = ?, overtime = ? WHERE id = ?',
-      [currentTime, overtime, existing[0].id]
+      [currentTime, overtime, existing.id]
     );
 
     res.json({
@@ -125,13 +125,13 @@ router.get('/history', authenticateToken, async (req, res) => {
 
     // Nếu không phải admin/hr thì chỉ xem của mình
     if (req.user.role === 'employee') {
-      const [employees] = await pool.execute(
+      const employee = await dbGet(
         'SELECT id FROM employees WHERE user_id = ?',
         [req.user.id]
       );
-      if (employees.length > 0) {
+      if (employee) {
         query += ' AND te.employee_id = ?';
-        params.push(employees[0].id);
+        params.push(employee.id);
       }
     } else if (employeeId) {
       query += ' AND te.employee_id = ?';
@@ -150,7 +150,7 @@ router.get('/history', authenticateToken, async (req, res) => {
 
     query += ' ORDER BY te.date DESC, te.check_in DESC';
 
-    const [entries] = await pool.execute(query, params);
+    const entries = await dbAll(query, params);
     res.json(entries);
   } catch (error) {
     console.error('Lỗi lấy lịch sử chấm công:', error);
@@ -169,33 +169,33 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const params = [currentYear, currentMonth];
 
     if (req.user.role === 'employee') {
-      const [employees] = await pool.execute(
+      const employee = await dbGet(
         'SELECT id FROM employees WHERE user_id = ?',
         [req.user.id]
       );
-      if (employees.length > 0) {
+      if (employee) {
         employeeFilter = 'AND te.employee_id = ?';
-        params.push(employees[0].id);
+        params.push(employee.id);
       }
     } else if (employeeId) {
       employeeFilter = 'AND te.employee_id = ?';
       params.push(employeeId);
     }
 
-    const [stats] = await pool.execute(`
+    const stats = await dbGet(`
       SELECT 
         COUNT(*) as total_days,
         SUM(CASE WHEN status = 'on_time' THEN 1 ELSE 0 END) as on_time_days,
         SUM(CASE WHEN status = 'late' THEN 1 ELSE 0 END) as late_days,
         SUM(overtime) as total_overtime,
         AVG(CASE WHEN check_in IS NOT NULL AND check_out IS NOT NULL 
-            THEN TIME_TO_SEC(TIMEDIFF(check_out, check_in))/3600 
+            THEN (JULIANDAY(check_out) - JULIANDAY(check_in)) * 24
             ELSE NULL END) as avg_hours_per_day
       FROM time_entries te
-      WHERE YEAR(te.date) = ? AND MONTH(te.date) = ? ${employeeFilter}
+      WHERE STRFTIME('%Y', te.date) = ? AND STRFTIME('%m', te.date) = ? ${employeeFilter}
     `, params);
 
-    res.json(stats[0]);
+    res.json(stats || {});
   } catch (error) {
     console.error('Lỗi thống kê chấm công:', error);
     res.status(500).json({ message: 'Lỗi server' });

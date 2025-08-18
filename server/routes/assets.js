@@ -1,5 +1,5 @@
 import express from 'express';
-import { pool } from '../config/database.js';
+import { dbRun, dbGet, dbAll } from '../config/database.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -34,7 +34,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
     query += ' ORDER BY a.created_at DESC';
 
-    const [assets] = await pool.execute(query, params);
+    const assets = await dbAll(query, params);
     res.json(assets);
   } catch (error) {
     console.error('Lỗi lấy danh sách tài sản:', error);
@@ -50,7 +50,7 @@ router.post('/', authenticateToken, authorizeRoles('admin', 'hr'), async (req, r
       warranty_date, value, condition_status
     } = req.body;
 
-    const [result] = await pool.execute(
+    const result = await dbRun(
       `INSERT INTO assets (name, type, model, serial_number, purchase_date, warranty_date, value, condition_status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [name, type, model, serial_number, purchase_date, warranty_date || null, value, condition_status]
@@ -58,11 +58,11 @@ router.post('/', authenticateToken, authorizeRoles('admin', 'hr'), async (req, r
 
     res.status(201).json({
       message: 'Tạo tài sản thành công',
-      assetId: result.insertId
+      assetId: result.lastID
     });
   } catch (error) {
     console.error('Lỗi tạo tài sản:', error);
-    if (error.code === 'ER_DUP_ENTRY') {
+    if (error.code === 'SQLITE_CONSTRAINT') {
       res.status(400).json({ message: 'Số serial đã tồn tại' });
     } else {
       res.status(500).json({ message: 'Lỗi server' });
@@ -76,7 +76,7 @@ router.put('/:id/assign', authenticateToken, authorizeRoles('admin', 'hr'), asyn
     const { employee_id } = req.body;
     const assignedDate = new Date().toISOString().split('T')[0];
 
-    await pool.execute(
+    await dbRun(
       'UPDATE assets SET assigned_to = ?, assigned_date = ?, status = ? WHERE id = ?',
       [employee_id, assignedDate, 'assigned', req.params.id]
     );
@@ -91,7 +91,7 @@ router.put('/:id/assign', authenticateToken, authorizeRoles('admin', 'hr'), asyn
 // Thu hồi tài sản
 router.put('/:id/return', authenticateToken, authorizeRoles('admin', 'hr'), async (req, res) => {
   try {
-    await pool.execute(
+    await dbRun(
       'UPDATE assets SET assigned_to = NULL, assigned_date = NULL, status = ? WHERE id = ?',
       ['available', req.params.id]
     );
@@ -110,7 +110,7 @@ router.put('/:id', authenticateToken, authorizeRoles('admin', 'hr'), async (req,
       name, model, condition_status, status, value, warranty_date
     } = req.body;
 
-    await pool.execute(
+    await dbRun(
       'UPDATE assets SET name = ?, model = ?, condition_status = ?, status = ?, value = ?, warranty_date = ? WHERE id = ?',
       [name, model, condition_status, status, value, warranty_date || null, req.params.id]
     );
@@ -125,7 +125,7 @@ router.put('/:id', authenticateToken, authorizeRoles('admin', 'hr'), async (req,
 // Thống kê tài sản
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
-    const [stats] = await pool.execute(`
+    const stats = await dbGet(`
       SELECT 
         COUNT(*) as total,
         SUM(CASE WHEN status = 'available' THEN 1 ELSE 0 END) as available,
@@ -136,7 +136,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
       FROM assets
     `);
 
-    res.json(stats[0]);
+    res.json(stats || {});
   } catch (error) {
     console.error('Lỗi thống kê tài sản:', error);
     res.status(500).json({ message: 'Lỗi server' });

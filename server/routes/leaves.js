@@ -1,5 +1,5 @@
 import express from 'express';
-import { pool } from '../config/database.js';
+import { dbRun, dbGet, dbAll } from '../config/database.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -10,30 +10,30 @@ router.post('/', authenticateToken, async (req, res) => {
     const { type, start_date, end_date, reason } = req.body;
 
     // Lấy employee_id từ user
-    const [employees] = await pool.execute(
+    const employee = await dbGet(
       'SELECT id FROM employees WHERE user_id = ?',
       [req.user.id]
     );
 
-    if (employees.length === 0) {
+    if (!employee) {
       return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
     }
 
-    const employeeId = employees[0].id;
+    const employeeId = employee.id;
 
     // Tính số ngày nghỉ
     const startDate = new Date(start_date);
     const endDate = new Date(end_date);
     const days = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
 
-    const [result] = await pool.execute(
+    const result = await dbRun(
       'INSERT INTO leave_requests (employee_id, type, start_date, end_date, days, reason) VALUES (?, ?, ?, ?, ?, ?)',
       [employeeId, type, start_date, end_date, days, reason]
     );
 
     res.status(201).json({
       message: 'Gửi đơn xin nghỉ phép thành công',
-      requestId: result.insertId
+      requestId: result.lastID
     });
   } catch (error) {
     console.error('Lỗi tạo đơn nghỉ phép:', error);
@@ -57,13 +57,13 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Nếu là nhân viên thì chỉ xem đơn của mình
     if (req.user.role === 'employee') {
-      const [employees] = await pool.execute(
+      const employee = await dbGet(
         'SELECT id FROM employees WHERE user_id = ?',
         [req.user.id]
       );
-      if (employees.length > 0) {
+      if (employee) {
         query += ' AND lr.employee_id = ?';
-        params.push(employees[0].id);
+        params.push(employee.id);
       }
     } else if (employeeId) {
       query += ' AND lr.employee_id = ?';
@@ -82,7 +82,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
     query += ' ORDER BY lr.created_at DESC';
 
-    const [requests] = await pool.execute(query, params);
+    const requests = await dbAll(query, params);
     res.json(requests);
   } catch (error) {
     console.error('Lỗi lấy danh sách đơn nghỉ phép:', error);
@@ -96,18 +96,18 @@ router.put('/:id/approve', authenticateToken, authorizeRoles('admin', 'hr', 'man
     const { status } = req.body; // 'approved' hoặc 'rejected'
     
     // Lấy employee_id của người duyệt
-    const [employees] = await pool.execute(
+    const employee = await dbGet(
       'SELECT id FROM employees WHERE user_id = ?',
       [req.user.id]
     );
 
-    if (employees.length === 0) {
+    if (!employee) {
       return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
     }
 
-    const approverId = employees[0].id;
+    const approverId = employee.id;
 
-    await pool.execute(
+    await dbRun(
       'UPDATE leave_requests SET status = ?, approved_by = ? WHERE id = ?',
       [status, approverId, req.params.id]
     );
@@ -125,24 +125,24 @@ router.put('/:id/approve', authenticateToken, authorizeRoles('admin', 'hr', 'man
 router.get('/balance', authenticateToken, async (req, res) => {
   try {
     // Lấy employeeId của user hiện tại
-    const [employees] = await pool.execute(
+    const employee = await dbGet(
       'SELECT id FROM employees WHERE user_id = ?',
       [req.user.id]
     );
-    if (employees.length === 0) {
+    if (!employee) {
       return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
     }
-    const employeeId = employees[0].id;
+    const employeeId = employee.id;
 
     const currentYear = new Date().getFullYear();
 
     // Tính tổng ngày đã nghỉ trong năm
-    const [usedDays] = await pool.execute(`
+    const usedDays = await dbGet(`
       SELECT 
         SUM(CASE WHEN type = 'annual' AND status = 'approved' THEN days ELSE 0 END) as annual_used,
         SUM(CASE WHEN type = 'sick' AND status = 'approved' THEN days ELSE 0 END) as sick_used
       FROM leave_requests 
-      WHERE employee_id = ? AND YEAR(start_date) = ?
+      WHERE employee_id = ? AND STRFTIME('%Y', start_date) = ?
     `, [employeeId, currentYear]);
 
     // Quy định phép năm (có thể lấy từ config hoặc employee profile)
@@ -152,13 +152,13 @@ router.get('/balance', authenticateToken, async (req, res) => {
     const balance = {
       annual: {
         total: annualLeaveEntitlement,
-        used: usedDays[0].annual_used || 0,
-        remaining: annualLeaveEntitlement - (usedDays[0].annual_used || 0)
+        used: usedDays?.annual_used || 0,
+        remaining: annualLeaveEntitlement - (usedDays?.annual_used || 0)
       },
       sick: {
         total: sickLeaveEntitlement,
-        used: usedDays[0].sick_used || 0,
-        remaining: sickLeaveEntitlement - (usedDays[0].sick_used || 0)
+        used: usedDays?.sick_used || 0,
+        remaining: sickLeaveEntitlement - (usedDays?.sick_used || 0)
       }
     };
 
@@ -177,12 +177,12 @@ router.get('/balance/:employeeId', authenticateToken, authorizeRoles('admin', 'h
     const currentYear = new Date().getFullYear();
 
     // Tính tổng ngày đã nghỉ trong năm
-    const [usedDays] = await pool.execute(`
+    const usedDays = await dbGet(`
       SELECT 
         SUM(CASE WHEN type = 'annual' AND status = 'approved' THEN days ELSE 0 END) as annual_used,
         SUM(CASE WHEN type = 'sick' AND status = 'approved' THEN days ELSE 0 END) as sick_used
       FROM leave_requests 
-      WHERE employee_id = ? AND YEAR(start_date) = ?
+      WHERE employee_id = ? AND STRFTIME('%Y', start_date) = ?
     `, [employeeId, currentYear]);
 
     // Quy định phép năm (có thể lấy từ config hoặc employee profile)
@@ -192,13 +192,13 @@ router.get('/balance/:employeeId', authenticateToken, authorizeRoles('admin', 'h
     const balance = {
       annual: {
         total: annualLeaveEntitlement,
-        used: usedDays[0].annual_used || 0,
-        remaining: annualLeaveEntitlement - (usedDays[0].annual_used || 0)
+        used: usedDays?.annual_used || 0,
+        remaining: annualLeaveEntitlement - (usedDays?.annual_used || 0)
       },
       sick: {
         total: sickLeaveEntitlement,
-        used: usedDays[0].sick_used || 0,
-        remaining: sickLeaveEntitlement - (usedDays[0].sick_used || 0)
+        used: usedDays?.sick_used || 0,
+        remaining: sickLeaveEntitlement - (usedDays?.sick_used || 0)
       }
     };
 

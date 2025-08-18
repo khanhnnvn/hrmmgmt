@@ -1,5 +1,5 @@
 import express from 'express';
-import { pool } from '../config/database.js';
+import { dbRun, dbGet, dbAll } from '../config/database.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -35,7 +35,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
     query += ' ORDER BY e.created_at DESC';
 
-    const [employees] = await pool.execute(query, params);
+    const employees = await dbAll(query, params);
     
     res.json(employees);
   } catch (error) {
@@ -47,7 +47,7 @@ router.get('/', authenticateToken, async (req, res) => {
 // Lấy thông tin chi tiết nhân viên
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
-    const [employees] = await pool.execute(
+    const employee = await dbGet(
       `SELECT e.*, u.email as user_email, m.name as manager_name
        FROM employees e
        LEFT JOIN users u ON e.user_id = u.id
@@ -56,11 +56,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
       [req.params.id]
     );
 
-    if (employees.length === 0) {
+    if (!employee) {
       return res.status(404).json({ message: 'Nhân viên không tồn tại' });
     }
 
-    res.json(employees[0]);
+    res.json(employee);
   } catch (error) {
     console.error('Lỗi lấy thông tin nhân viên:', error);
     res.status(500).json({ message: 'Lỗi server' });
@@ -75,7 +75,7 @@ router.post('/', authenticateToken, authorizeRoles('admin', 'hr'), async (req, r
       manager_id, join_date, salary, skills
     } = req.body;
 
-    const [result] = await pool.execute(
+    const result = await dbRun(
       `INSERT INTO employees (employee_id, name, email, phone, department, position, manager_id, join_date, salary, skills)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [employee_id, name, email, phone, department, position, manager_id || null, join_date, salary, JSON.stringify(skills || [])]
@@ -83,11 +83,11 @@ router.post('/', authenticateToken, authorizeRoles('admin', 'hr'), async (req, r
 
     res.status(201).json({
       message: 'Tạo nhân viên thành công',
-      employeeId: result.insertId
+      employeeId: result.lastID
     });
   } catch (error) {
     console.error('Lỗi tạo nhân viên:', error);
-    if (error.code === 'ER_DUP_ENTRY') {
+    if (error.code === 'SQLITE_CONSTRAINT') {
       res.status(400).json({ message: 'Mã nhân viên hoặc email đã tồn tại' });
     } else {
       res.status(500).json({ message: 'Lỗi server' });
@@ -103,7 +103,7 @@ router.put('/:id', authenticateToken, authorizeRoles('admin', 'hr'), async (req,
       manager_id, salary, status, skills, kpi
     } = req.body;
 
-    await pool.execute(
+    await dbRun(
       `UPDATE employees SET 
        name = ?, email = ?, phone = ?, department = ?, position = ?,
        manager_id = ?, salary = ?, status = ?, skills = ?, kpi = ?
@@ -121,7 +121,7 @@ router.put('/:id', authenticateToken, authorizeRoles('admin', 'hr'), async (req,
 // Xóa nhân viên
 router.delete('/:id', authenticateToken, authorizeRoles('admin', 'hr'), async (req, res) => {
   try {
-    await pool.execute('DELETE FROM employees WHERE id = ?', [req.params.id]);
+    await dbRun('DELETE FROM employees WHERE id = ?', [req.params.id]);
     res.json({ message: 'Xóa nhân viên thành công' });
   } catch (error) {
     console.error('Lỗi xóa nhân viên:', error);

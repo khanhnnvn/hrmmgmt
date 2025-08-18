@@ -1,5 +1,5 @@
 import express from 'express';
-import { pool } from '../config/database.js';
+import { dbRun, dbGet, dbAll } from '../config/database.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -10,25 +10,25 @@ router.post('/', authenticateToken, authorizeRoles('admin', 'hr', 'manager'), as
     const { title, description, assigned_to, department, priority, due_date } = req.body;
 
     // Lấy employee_id của người tạo task
-    const [employees] = await pool.execute(
+    const employee = await dbGet(
       'SELECT id FROM employees WHERE user_id = ?',
       [req.user.id]
     );
 
-    if (employees.length === 0) {
+    if (!employee) {
       return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
     }
 
-    const assignedBy = employees[0].id;
+    const assignedBy = employee.id;
 
-    const [result] = await pool.execute(
+    const result = await dbRun(
       'INSERT INTO tasks (title, description, assigned_to, assigned_by, department, priority, due_date) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [title, description, assigned_to, assignedBy, department, priority, due_date]
     );
 
     res.status(201).json({
       message: 'Tạo công việc thành công',
-      taskId: result.insertId
+      taskId: result.lastID
     });
   } catch (error) {
     console.error('Lỗi tạo task:', error);
@@ -54,23 +54,23 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Nếu là nhân viên thì chỉ xem task được giao
     if (req.user.role === 'employee') {
-      const [employees] = await pool.execute(
+      const employee = await dbGet(
         'SELECT id FROM employees WHERE user_id = ?',
         [req.user.id]
       );
-      if (employees.length > 0) {
+      if (employee) {
         query += ' AND t.assigned_to = ?';
-        params.push(employees[0].id);
+        params.push(employee.id);
       }
     } else if (req.user.role === 'manager') {
       // Manager xem task của department hoặc do mình giao
-      const [employees] = await pool.execute(
+      const employee = await dbGet(
         'SELECT id, department FROM employees WHERE user_id = ?',
         [req.user.id]
       );
-      if (employees.length > 0) {
+      if (employee) {
         query += ' AND (t.assigned_by = ? OR t.department = ?)';
-        params.push(employees[0].id, employees[0].department);
+        params.push(employee.id, employee.department);
       }
     }
 
@@ -91,18 +91,18 @@ router.get('/', authenticateToken, async (req, res) => {
 
     query += ' ORDER BY t.created_at DESC';
 
-    const [tasks] = await pool.execute(query, params);
+    const tasks = await dbAll(query, params);
 
     // Lấy comments cho mỗi task
     for (let task of tasks) {
-      const [comments] = await pool.execute(`
+      const comments = await dbAll(`
         SELECT tc.*, u.name as user_name
         FROM task_comments tc
         JOIN users u ON tc.user_id = u.id
         WHERE tc.task_id = ?
         ORDER BY tc.created_at DESC
       `, [task.id]);
-      task.comments = comments;
+      task.comments = comments || [];
     }
 
     res.json(tasks);
@@ -127,7 +127,7 @@ router.put('/:id/progress', authenticateToken, async (req, res) => {
       completedDate = new Date().toISOString().split('T')[0];
     }
 
-    await pool.execute(
+    await dbRun(
       'UPDATE tasks SET progress = ?, status = ?, completed_date = ? WHERE id = ?',
       [progress, status, completedDate, req.params.id]
     );
@@ -144,7 +144,7 @@ router.post('/:id/comments', authenticateToken, async (req, res) => {
   try {
     const { comment } = req.body;
 
-    await pool.execute(
+    await dbRun(
       'INSERT INTO task_comments (task_id, user_id, comment) VALUES (?, ?, ?)',
       [req.params.id, req.user.id, comment]
     );
@@ -166,7 +166,7 @@ router.put('/:id/status', authenticateToken, async (req, res) => {
       completedDate = new Date().toISOString().split('T')[0];
     }
 
-    await pool.execute(
+    await dbRun(
       'UPDATE tasks SET status = ?, completed_date = ? WHERE id = ?',
       [status, completedDate, req.params.id]
     );
@@ -185,26 +185,26 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const params = [];
 
     if (req.user.role === 'employee') {
-      const [employees] = await pool.execute(
+      const employee = await dbGet(
         'SELECT id FROM employees WHERE user_id = ?',
         [req.user.id]
       );
-      if (employees.length > 0) {
+      if (employee) {
         whereClause = 'WHERE assigned_to = ?';
-        params.push(employees[0].id);
+        params.push(employee.id);
       }
     } else if (req.user.role === 'manager') {
-      const [employees] = await pool.execute(
+      const employee = await dbGet(
         'SELECT id, department FROM employees WHERE user_id = ?',
         [req.user.id]
       );
-      if (employees.length > 0) {
+      if (employee) {
         whereClause = 'WHERE (assigned_by = ? OR department = ?)';
-        params.push(employees[0].id, employees[0].department);
+        params.push(employee.id, employee.department);
       }
     }
 
-    const [stats] = await pool.execute(`
+    const stats = await dbGet(`
       SELECT 
         COUNT(*) as total,
         SUM(CASE WHEN status = 'not_started' THEN 1 ELSE 0 END) as not_started,
@@ -214,7 +214,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
       FROM tasks ${whereClause}
     `, params);
 
-    res.json(stats[0]);
+    res.json(stats || {});
   } catch (error) {
     console.error('Lỗi thống kê tasks:', error);
     res.status(500).json({ message: 'Lỗi server' });

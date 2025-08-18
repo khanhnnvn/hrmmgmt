@@ -1,5 +1,5 @@
 import express from 'express';
-import { pool } from '../config/database.js';
+import { dbRun, dbGet, dbAll } from '../config/database.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -10,25 +10,25 @@ router.post('/', authenticateToken, async (req, res) => {
     const { task_id, title, description, type, date, hours_spent } = req.body;
 
     // Lấy employee_id từ user
-    const [employees] = await pool.execute(
+    const employee = await dbGet(
       'SELECT id FROM employees WHERE user_id = ?',
       [req.user.id]
     );
 
-    if (employees.length === 0) {
+    if (!employee) {
       return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
     }
 
-    const employeeId = employees[0].id;
+    const employeeId = employee.id;
 
-    const [result] = await pool.execute(
+    const result = await dbRun(
       'INSERT INTO work_reports (employee_id, task_id, title, description, type, date, hours_spent, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [employeeId, task_id || null, title, description, type, date, hours_spent, 'submitted']
     );
 
     res.status(201).json({
       message: 'Tạo báo cáo thành công',
-      reportId: result.insertId
+      reportId: result.lastID
     });
   } catch (error) {
     console.error('Lỗi tạo báo cáo:', error);
@@ -41,25 +41,25 @@ router.post('/draft', authenticateToken, async (req, res) => {
   try {
     const { task_id, title, description, type, date, hours_spent } = req.body;
 
-    const [employees] = await pool.execute(
+    const employee = await dbGet(
       'SELECT id FROM employees WHERE user_id = ?',
       [req.user.id]
     );
 
-    if (employees.length === 0) {
+    if (!employee) {
       return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
     }
 
-    const employeeId = employees[0].id;
+    const employeeId = employee.id;
 
-    const [result] = await pool.execute(
+    const result = await dbRun(
       'INSERT INTO work_reports (employee_id, task_id, title, description, type, date, hours_spent, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [employeeId, task_id || null, title, description, type, date, hours_spent, 'draft']
     );
 
     res.status(201).json({
       message: 'Lưu bản nháp thành công',
-      reportId: result.insertId
+      reportId: result.lastID
     });
   } catch (error) {
     console.error('Lỗi lưu bản nháp:', error);
@@ -84,13 +84,13 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Nếu là nhân viên thì chỉ xem báo cáo của mình
     if (req.user.role === 'employee') {
-      const [employees] = await pool.execute(
+      const employee = await dbGet(
         'SELECT id FROM employees WHERE user_id = ?',
         [req.user.id]
       );
-      if (employees.length > 0) {
+      if (employee) {
         query += ' AND wr.employee_id = ?';
-        params.push(employees[0].id);
+        params.push(employee.id);
       }
     } else if (employeeId) {
       query += ' AND wr.employee_id = ?';
@@ -119,7 +119,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
     query += ' ORDER BY wr.created_at DESC';
 
-    const [reports] = await pool.execute(query, params);
+    const reports = await dbAll(query, params);
     res.json(reports);
   } catch (error) {
     console.error('Lỗi lấy danh sách báo cáo:', error);
@@ -133,18 +133,18 @@ router.put('/:id/approve', authenticateToken, authorizeRoles('admin', 'hr', 'man
     const { status, feedback } = req.body; // 'approved' hoặc 'rejected'
     
     // Lấy employee_id của người duyệt
-    const [employees] = await pool.execute(
+    const employee = await dbGet(
       'SELECT id FROM employees WHERE user_id = ?',
       [req.user.id]
     );
 
-    if (employees.length === 0) {
+    if (!employee) {
       return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
     }
 
-    const approverId = employees[0].id;
+    const approverId = employee.id;
 
-    await pool.execute(
+    await dbRun(
       'UPDATE work_reports SET status = ?, approved_by = ?, feedback = ? WHERE id = ?',
       [status, approverId, feedback || null, req.params.id]
     );
@@ -165,17 +165,17 @@ router.get('/stats', authenticateToken, async (req, res) => {
     const params = [];
 
     if (req.user.role === 'employee') {
-      const [employees] = await pool.execute(
+      const employee = await dbGet(
         'SELECT id FROM employees WHERE user_id = ?',
         [req.user.id]
       );
-      if (employees.length > 0) {
+      if (employee) {
         whereClause = 'WHERE employee_id = ?';
-        params.push(employees[0].id);
+        params.push(employee.id);
       }
     }
 
-    const [stats] = await pool.execute(`
+    const stats = await dbGet(`
       SELECT 
         COUNT(*) as total,
         SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) as draft,
@@ -186,7 +186,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
       FROM work_reports ${whereClause}
     `, params);
 
-    res.json(stats[0]);
+    res.json(stats || {});
   } catch (error) {
     console.error('Lỗi thống kê báo cáo:', error);
     res.status(500).json({ message: 'Lỗi server' });
