@@ -121,22 +121,58 @@ router.put('/:id/approve', authenticateToken, authorizeRoles('admin', 'hr', 'man
   }
 });
 
-// Lấy số ngày phép còn lại
-router.get('/balance/:employeeId?', authenticateToken, async (req, res) => {
+// Lấy số ngày phép còn lại cho nhân viên hiện tại
+router.get('/balance', authenticateToken, async (req, res) => {
   try {
-    let employeeId = req.params.employeeId;
-    
-    // Nếu không có employeeId thì lấy của user hiện tại
-    if (!employeeId) {
-      const [employees] = await pool.execute(
-        'SELECT id FROM employees WHERE user_id = ?',
-        [req.user.id]
-      );
-      if (employees.length === 0) {
-        return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
-      }
-      employeeId = employees[0].id;
+    // Lấy employeeId của user hiện tại
+    const [employees] = await pool.execute(
+      'SELECT id FROM employees WHERE user_id = ?',
+      [req.user.id]
+    );
+    if (employees.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy thông tin nhân viên' });
     }
+    const employeeId = employees[0].id;
+
+    const currentYear = new Date().getFullYear();
+
+    // Tính tổng ngày đã nghỉ trong năm
+    const [usedDays] = await pool.execute(`
+      SELECT 
+        SUM(CASE WHEN type = 'annual' AND status = 'approved' THEN days ELSE 0 END) as annual_used,
+        SUM(CASE WHEN type = 'sick' AND status = 'approved' THEN days ELSE 0 END) as sick_used
+      FROM leave_requests 
+      WHERE employee_id = ? AND YEAR(start_date) = ?
+    `, [employeeId, currentYear]);
+
+    // Quy định phép năm (có thể lấy từ config hoặc employee profile)
+    const annualLeaveEntitlement = 15; // 15 ngày phép năm
+    const sickLeaveEntitlement = 10;   // 10 ngày phép ốm
+
+    const balance = {
+      annual: {
+        total: annualLeaveEntitlement,
+        used: usedDays[0].annual_used || 0,
+        remaining: annualLeaveEntitlement - (usedDays[0].annual_used || 0)
+      },
+      sick: {
+        total: sickLeaveEntitlement,
+        used: usedDays[0].sick_used || 0,
+        remaining: sickLeaveEntitlement - (usedDays[0].sick_used || 0)
+      }
+    };
+
+    res.json(balance);
+  } catch (error) {
+    console.error('Lỗi lấy số ngày phép:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
+});
+
+// Lấy số ngày phép còn lại cho nhân viên cụ thể (dành cho HR/Manager)
+router.get('/balance/:employeeId', authenticateToken, authorizeRoles('admin', 'hr', 'manager'), async (req, res) => {
+  try {
+    const employeeId = req.params.employeeId;
 
     const currentYear = new Date().getFullYear();
 
