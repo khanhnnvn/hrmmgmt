@@ -1,11 +1,36 @@
 import AutomatedTester from './automated-test.js';
 
+// Wait for server to start before running tests
+function waitForServer(url, timeout = 30000) {
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+    
+    function checkServer() {
+      fetch(url)
+        .then(() => resolve())
+        .catch(() => {
+          if (Date.now() - startTime > timeout) {
+            reject(new Error(`Server not ready after ${timeout}ms`));
+          } else {
+            setTimeout(checkServer, 1000);
+          }
+        });
+    }
+    
+    checkServer();
+  });
+}
+
 async function runTests() {
   console.log('🚀 Starting HRM System Automated Testing...\n');
   
   const tester = new AutomatedTester();
   
   try {
+    console.log('⏳ Waiting for server to start...');
+    await waitForServer('http://localhost:3001/api/dashboard/stats');
+    console.log('✅ Server is ready!\n');
+    
     const report = await tester.runAllTests();
     
     console.log('\n📊 Final Test Results:');
